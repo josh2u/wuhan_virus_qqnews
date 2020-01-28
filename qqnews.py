@@ -14,10 +14,10 @@ URLS = {
 
 DATA = {}
 
-## TODO change this to MYSQL 
-
-# db = MySQLDatabase('QQNews', user='app', password='db_password',
-#                          host='10.1.0.8', port=3316)
+# # ## TODO change this to MYSQL 
+# endpoint = 'xxx'
+# db = MySQLDatabase('yy', user='xx', password='xx',
+#                          host=endpoint, port=3306)
 
 db = SqliteDatabase('qq.db')
 
@@ -30,7 +30,7 @@ class QQNEWS_LIVE(Model):
   dead_count = IntegerField(null=True)
   cure_count = IntegerField(null=True)
   use_total = IntegerField(null=True)
-  hint_words = TextField(null=True, index=True)
+  hint_words = CharField(null=True, index=True)
   recent_time = DateTimeField(index=True)
   query_time = DateTimeField(index=True, default=datetime.now())
 
@@ -39,7 +39,7 @@ class QQNEWS_LIVE(Model):
 
 class QQNEWS_DAILY_SUMMARY(Model):
   _id = AutoField(index=True, unique=True)
-  date = DateField(formats=['%m:%y'], unique=True)
+  date =  DateField(unique=True)
   confirm_count = IntegerField(null=True)
   suspect_count = IntegerField(null=True)
   dead_count = IntegerField(null=True)
@@ -65,11 +65,11 @@ class QQNEWS_AREA(Model):
 
 class QQNEWS_NEWS(Model):
   _id = AutoField(index=True, unique=True)
-  time = DateTimeField(formats=['%m:%y %H:%M'], null=True)
-  title = TextField(unique=True, index=True)
-  desc = TextField(null=True, index=True)
-  source = TextField(null=True, index=True)
-  create_time = DateTimeField(formats=['%Y-%m-%dT%H:%M:%S.%f%z'], null=True, index=True, ) 
+  time = DateTimeField(null=True)
+  title = CharField(unique=True, index=True)
+  desc = CharField(null=True, index=True)
+  source = CharField(null=True, index=True)
+  create_time = DateTimeField(index=True, ) 
   query_time = DateTimeField(index=True, default=datetime.now())
 
   class Meta:
@@ -83,6 +83,7 @@ TABLE_NAMES = {'qqnews_live': QQNEWS_LIVE,
 # Connect to DB, if table not exist, create it.
 db.connect()
 create_table = list(set(TABLE_NAMES.keys()) - set (db.get_tables()))
+
 if create_table:
   print ('Table not exist.. create it')
   tables = map(lambda x: TABLE_NAMES[x], create_table)
@@ -103,28 +104,31 @@ for key, url in URLS.items():
 #   DATA = pickle.load(f)
 
 
-############ DATA PROCESSING AND SAVE TO DB ########################
+########### DATA PROCESSING AND SAVE TO DB ########################
 ## process Live
 print ('processing live data ...')
 glo = json.loads(DATA['global'])
 for g in glo:
+  recent_dt = datetime.strptime(g.get('recentTime', ''), '%Y-%m-%d %H:%M')
   ql = QQNEWS_LIVE(confirm_count = g.get('confirmCount', None),
               suspect_count = g.get('suspectCount', None),
               dead_count = g.get('deadCount', None),
               cure_count =  g.get('cure', None),
               use_total = g.get('useTotal', None),
               hint_words = g.get('hintWords', None),
-              recent_time = g.get('recentTime', None),
+              recent_time = recent_dt,
             )
   ql.save()
+  print ('saved. ', ql._id)
   
   
 ## process daily summary
 print ('processing daily summary ...')
 daily = json.loads(DATA['day_count'])
 for d in daily:
+  dt = datetime.strptime(d.get('date', ''), '%m.%d').replace(year=datetime.now().year)
   dobj, iscreated = QQNEWS_DAILY_SUMMARY.get_or_create(
-        date = d.get('date', None),
+        date = dt,
         confirm_count = d.get('confirm', None),
         suspect_count = d.get('suspect', None),
         dead_count = d.get('dead', None),
@@ -158,12 +162,14 @@ for a in arealist:
 print ('processing news ...')
 news = json.loads(DATA['news'])
 for n in news:
+  new_time = datetime.strptime(n.get('time', ''), '%m-%d %H:%M').replace(year=datetime.now().year)
+  create_dt = datetime.strptime(n.get('create_time', ''), '%Y-%m-%dT%H:%M:%S.000Z')
   nobj, iscreated = QQNEWS_NEWS.get_or_create(
-          time = n.get('time', None),
+          time = new_time,
           title = n.get('title', None),
           desc = n.get('desc', None),
           source = n.get('source', None),
-          create_time = n.get('create_time', None),
+          create_time = create_dt,
         )
   if iscreated:
     print ('save NEWS id:', nobj._id)
