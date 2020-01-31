@@ -13,13 +13,61 @@ URLS = {
 }
 
 DATA = {}
+DICT_FILE = 'loc_translate.pickle'
 
-# # ## TODO change this to MYSQL 
+# ## TODO change this to MYSQL 
 # endpoint = 'xxx'
 # db = MySQLDatabase('yy', user='xx', password='xx',
 #                          host=endpoint, port=3306)
 
 db = SqliteDatabase('qq.db')
+################ TRANSLATION ################
+
+loc_tran = None
+try:
+  with open(DICT_FILE, 'rb') as f:
+    loc_tran = pickle.load(f)
+except FileNotFoundError:
+  print ('translation file not found.')
+  loc_tran = {}
+    
+
+def zh_en_loc(name, cac):
+
+  if name == None or name == '':
+    return name
+  
+  tran_name = loc_tran.get(name, None)
+  
+  if tran_name:
+    #if translation found, return
+    return tran_name
+
+  else:
+    #if translation not found, get yandex translation and store to dictionary
+    country, area, city = cac
+    q = f'{country} # {area} # {city}'
+    print (q)
+    q = requests.utils.quote(q)
+    url = f'https://translate.yandex.net/api/v1.5/tr.json/translate?text={q}&lang=zh-en&key=trnsl.1.1.20200130T145851Z.6e6374d5b42d9151.142c3045f7a677d6571c8602c098a600ff31df0e'
+    resp = requests.post(url)
+    jtxt = resp.json()
+
+    chars_to_remove = [u'"', u"'", u'(', u')', u',']
+    dd = {ord(c):None for c in chars_to_remove}
+
+    tran_txt_clean = jtxt['text'][0].translate(dd)
+
+    for zh, en in zip(cac, tran_txt_clean.split('#')):
+      loc_tran[zh] = en.strip()
+
+    with open(DICT_FILE, 'wb') as f:
+      pickle.dump(loc_tran, f)
+
+    return loc_tran[name]
+
+
+    
 
 ################# DATABASE MODEL DEFINATION ##############
 
@@ -39,7 +87,7 @@ class QQNEWS_LIVE(Model):
 
 class QQNEWS_DAILY_SUMMARY(Model):
   _id = AutoField(index=True, unique=True)
-  date =  DateField(unique=True)
+  date =  DateField(index=True)
   confirm_count = IntegerField(null=True)
   suspect_count = IntegerField(null=True)
   dead_count = IntegerField(null=True)
@@ -54,6 +102,9 @@ class QQNEWS_AREA(Model):
   country = CharField(null=True, index=True)
   area = CharField(null=True, index=True)
   city = CharField(null=True, index=True)
+  country_en = CharField(null=True, index=True)
+  area_en = CharField(null=True, index=True)
+  city_en = CharField(null=True, index=True)
   confirm_count = IntegerField(null=True)
   suspect_count = IntegerField(null=True)
   dead_count = IntegerField(null=True)
@@ -66,10 +117,10 @@ class QQNEWS_AREA(Model):
 class QQNEWS_NEWS(Model):
   _id = AutoField(index=True, unique=True)
   time = DateTimeField(null=True)
-  title = CharField(unique=True, index=True)
+  title = CharField(index=True)
   desc = CharField(null=True, index=True)
   source = CharField(null=True, index=True)
-  create_time = DateTimeField(index=True, ) 
+  create_time = DateTimeField(index=True, null=True ) 
   query_time = DateTimeField(index=True, default=datetime.now())
 
   class Meta:
@@ -94,6 +145,8 @@ if create_table:
 ############ CONNECT TO QQ NEWS TO GET DATA #####################
 
 # http request from qq news
+print ('Scraping on :', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
 for key, url in URLS.items():
   print ('requesting: ', url)
   resp = requests.get(url)
@@ -145,10 +198,18 @@ for d in daily:
 print ('processing area update ...')
 arealist = json.loads(DATA['area_count'])
 for a in arealist:
+  country = a.get('country', None)
+  area = a.get('area', None)
+  city = a.get('city', None)
   aobj = QQNEWS_AREA(
-        country = a.get('country', None),
-        area = a.get('area', None),
-        city = a.get('city', None),
+        country = country,
+        area = area,
+        city = city,
+##TODO add translated version here
+        country_en = zh_en_loc(country, (country, area, city)), # more accurate translation with context
+        area_en = zh_en_loc(area, (country, area, city)),
+        city_en = zh_en_loc(city, (country, area, city)),
+
         confirm_count = a.get('confirm', None),
         suspect_count = a.get('suspect', None),
         dead_count = a.get('dead', None),
@@ -162,8 +223,17 @@ for a in arealist:
 print ('processing news ...')
 news = json.loads(DATA['news'])
 for n in news:
-  new_time = datetime.strptime(n.get('time', ''), '%m-%d %H:%M').replace(year=datetime.now().year)
-  create_dt = datetime.strptime(n.get('create_time', ''), '%Y-%m-%dT%H:%M:%S.000Z')
+
+  try:
+    new_time = datetime.strptime(n.get('time', '12-31 23:59'), '%m-%d %H:%M').replace(year=datetime.now().year)
+  except ValueError:
+    new_time = datetime(1000, 1, 1, 0,0,0)
+
+  try:
+    create_dt = datetime.strptime(n.get('create_time', '1000-01-01T00:00:00.000Z'), '%Y-%m-%dT%H:%M:%S.000Z')
+  except ValueError:
+    create_dt = datetime(1000,1,1,0,0,0)
+
   nobj, iscreated = QQNEWS_NEWS.get_or_create(
           time = new_time,
           title = n.get('title', None),
