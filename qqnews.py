@@ -1,28 +1,123 @@
-#!/usr/bin/env python
 import requests
 import json
-from peewee import *
-from datetime import datetime
+from peewee import MySQLDatabase, SqliteDatabase, Model, AutoField, CharField, IntegerField, DateTimeField,DateField
+from datetime import datetime, timedelta
 import pickle
 
 URLS = {
-  'global' : 'https://view.inews.qq.com/g2/getOnsInfo?name=wuwei_ww_global_vars',
-  'day_count': 'https://view.inews.qq.com/g2/getOnsInfo?name=wuwei_ww_cn_day_counts',
-  'area_count': 'https://view.inews.qq.com/g2/getOnsInfo?name=wuwei_ww_area_counts',
+  'all': 'https://view.inews.qq.com/g2/getOnsInfo?name=disease_h5',
   'news' : 'https://view.inews.qq.com/g2/getOnsInfo?name=wuwei_ww_time_line'
 }
 
 DATA = {}
-DICT_FILE = 'loc_translate.pickle'
 
-# ## TODO change this to MYSQL 
-# endpoint = 'xxx'
-# db = MySQLDatabase('yy', user='xx', password='xx',
+# endpoint = 'xx'
+# db = MySQLDatabase('xx', user='xx', password='xx', connect_timeout=20,
 #                          host=endpoint, port=3306)
 
-db = SqliteDatabase('qq.db')
-################ TRANSLATION ################
 
+db = SqliteDatabase('qq.db')
+
+dtnow = datetime.now()
+################# DATABASE MODEL DEFINATION ##############
+
+class QQNEWS_LIVE(Model):
+  _id = AutoField(index=True, unique=True)
+  date = CharField(null=True, index=True)
+  confirm_count = IntegerField(null=True)
+  suspect_count = IntegerField(null=True)
+  dead_count = IntegerField(null=True)
+  cure_count = IntegerField(null=True)
+  use_total = IntegerField(null=True)
+  hint_words = CharField(null=True, index=True)
+  recent_time = DateTimeField(index=True)
+  query_time = DateTimeField(index=True, default=dtnow)
+
+  class Meta:
+    database = db
+
+class QQNEWS_DAILY_SUMMARY(Model):
+  _id = AutoField(index=True, unique=True)
+  date =  DateField(index=True)
+  confirm_count = IntegerField(null=True)
+  suspect_count = IntegerField(null=True)
+  dead_count = IntegerField(null=True)
+  heal_count = IntegerField(null=True)
+  query_time = DateTimeField(index=True, default=dtnow)
+
+  class Meta:
+    database = db
+
+class QQNEWS_AREA(Model):
+  _id = AutoField(index=True, unique=True)
+  country = CharField(null=True, index=True)
+  area = CharField(null=True, index=True)
+  city = CharField(null=True, index=True)
+  country_en = CharField(null=True, index=True)
+  area_en = CharField(null=True, index=True)
+  city_en = CharField(null=True, index=True)
+  confirm_count = IntegerField(null=True)
+  suspect_count = IntegerField(null=True)
+  dead_count = IntegerField(null=True)
+  heal_count = IntegerField(null=True)
+  confirm_today_count = IntegerField(null=True)
+  suspect_today_count = IntegerField(null=True)
+  dead_today_count = IntegerField(null=True)
+  heal_today_count = IntegerField(null=True)
+  sourceLastUpdateTime = DateTimeField(index=True)
+  query_time = DateTimeField(index=True, default=dtnow)
+
+  class Meta:
+    database = db
+
+class QQNEWS_NEWS(Model):
+  _id = AutoField(index=True, unique=True)
+  time = DateTimeField(null=True)
+  title = CharField(index=True)
+  desc = CharField(null=True, index=True)
+  source = CharField(null=True, index=True)
+  create_time = DateTimeField(index=True, null=True ) 
+  query_time = DateTimeField(index=True, default=dtnow)
+
+  class Meta:
+    database = db
+
+TABLE_NAMES = {'qqnews_live': QQNEWS_LIVE,
+            'qqnews_daily_summary' : QQNEWS_DAILY_SUMMARY,
+            'qqnews_area' : QQNEWS_AREA,
+            'qqnews_news': QQNEWS_NEWS}
+
+
+############# Connect to db and create table if doesn't exist ###############
+
+# Connect to DB, if table not exist, create it.
+db.connect()
+create_table = list(set(TABLE_NAMES.keys()) - set (db.get_tables()))
+
+if create_table:
+  print ('Table not exist.. create it')
+  tables = map(lambda x: TABLE_NAMES[x], create_table)
+  db.create_tables(tables)
+  print ('Created table :', create_table)
+
+
+############ CONNECT TO QQ NEWS TO GET DATA #####################
+
+# http request from qq news
+print ('Scraping on :', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+for key, url in URLS.items():
+  print ('requesting: ', url)
+  resp = requests.get(url)
+  j = resp.json()
+  DATA[key] = resp.json().get('data', None)
+
+data = json.loads(DATA['all'])
+last_update_time = datetime.strptime(data['lastUpdateTime'], '%Y-%m-%d %H:%M:%S') - timedelta(hours=8)
+
+
+####### load dictionary #########
+DICT_FILE = 'loc_translate.pickle'
 loc_tran = None
 try:
   with open(DICT_FILE, 'rb') as f:
@@ -67,156 +162,135 @@ def zh_en_loc(name, cac):
     return loc_tran[name]
 
 
-    
-
-################# DATABASE MODEL DEFINATION ##############
-
-class QQNEWS_LIVE(Model):
-  _id = AutoField(index=True, unique=True)
-  confirm_count = IntegerField(null=True)
-  suspect_count = IntegerField(null=True)
-  dead_count = IntegerField(null=True)
-  cure_count = IntegerField(null=True)
-  use_total = IntegerField(null=True)
-  hint_words = CharField(null=True, index=True)
-  recent_time = DateTimeField(index=True)
-  query_time = DateTimeField(index=True, default=datetime.now())
-
-  class Meta:
-    database = db
-
-class QQNEWS_DAILY_SUMMARY(Model):
-  _id = AutoField(index=True, unique=True)
-  date =  DateField(index=True)
-  confirm_count = IntegerField(null=True)
-  suspect_count = IntegerField(null=True)
-  dead_count = IntegerField(null=True)
-  heal_count = IntegerField(null=True)
-  query_time = DateTimeField(index=True, default=datetime.now())
-
-  class Meta:
-    database = db
-
-class QQNEWS_AREA(Model):
-  _id = AutoField(index=True, unique=True)
-  country = CharField(null=True, index=True)
-  area = CharField(null=True, index=True)
-  city = CharField(null=True, index=True)
-  country_en = CharField(null=True, index=True)
-  area_en = CharField(null=True, index=True)
-  city_en = CharField(null=True, index=True)
-  confirm_count = IntegerField(null=True)
-  suspect_count = IntegerField(null=True)
-  dead_count = IntegerField(null=True)
-  heal_count = IntegerField(null=True)
-  query_time = DateTimeField(index=True, default=datetime.now())
-
-  class Meta:
-    database = db
-
-class QQNEWS_NEWS(Model):
-  _id = AutoField(index=True, unique=True)
-  time = DateTimeField(null=True)
-  title = CharField(index=True)
-  desc = CharField(null=True, index=True)
-  source = CharField(null=True, index=True)
-  create_time = DateTimeField(index=True, null=True ) 
-  query_time = DateTimeField(index=True, default=datetime.now())
-
-  class Meta:
-    database = db
-
-TABLE_NAMES = {'qqnews_live': QQNEWS_LIVE,
-            'qqnews_daily_summary' : QQNEWS_DAILY_SUMMARY,
-            'qqnews_area' : QQNEWS_AREA,
-            'qqnews_news': QQNEWS_NEWS}
-
-# Connect to DB, if table not exist, create it.
-db.connect()
-create_table = list(set(TABLE_NAMES.keys()) - set (db.get_tables()))
-
-if create_table:
-  print ('Table not exist.. create it')
-  tables = map(lambda x: TABLE_NAMES[x], create_table)
-  db.create_tables(tables)
-  print ('Created table :', create_table)
+###### LIVE ##########
+print ('processing live ...')
+g = data['chinaTotal']
+dt = datetime.strptime(g.get('date', ''), '%m.%d').replace(year=datetime.now().year)
+ql = QQNEWS_LIVE(
+        date = dt, #TODO add column
+        confirm_count = g.get('confirm', None),
+        suspect_count = g.get('suspect', None),
+        dead_count = g.get('dead', None),
+        cure_count =  g.get('heal', None),
+        use_total = None,
+        hint_words = None,
+        recent_time = last_update_time,
+            
+      )
+ql.save()
 
 
-############ CONNECT TO QQ NEWS TO GET DATA #####################
-
-# http request from qq news
-print ('Scraping on :', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-
-for key, url in URLS.items():
-  print ('requesting: ', url)
-  resp = requests.get(url)
-  j = resp.json()
-  DATA[key] = resp.json().get('data', None)
-
-# with open('sample_data.pkl', 'rb') as f:
-#   DATA = pickle.load(f)
+########## DAILY ##########
+daily = data['chinaDayList']
 
 
-########### DATA PROCESSING AND SAVE TO DB ########################
-## process Live
-print ('processing live data ...')
-glo = json.loads(DATA['global'])
-for g in glo:
-  recent_dt = datetime.strptime(g.get('recentTime', ''), '%Y-%m-%d %H:%M')
-  ql = QQNEWS_LIVE(confirm_count = g.get('confirmCount', None),
-              suspect_count = g.get('suspectCount', None),
-              dead_count = g.get('deadCount', None),
-              cure_count =  g.get('cure', None),
-              use_total = g.get('useTotal', None),
-              hint_words = g.get('hintWords', None),
-              recent_time = recent_dt,
-            )
-  ql.save()
-  print ('saved. ', ql._id)
-  
-  
 ## process daily summary
 print ('processing daily summary ...')
-daily = json.loads(DATA['day_count'])
 for d in daily:
   dt = datetime.strptime(d.get('date', ''), '%m.%d').replace(year=datetime.now().year)
   dobj, iscreated = QQNEWS_DAILY_SUMMARY.get_or_create(
-        date = dt,
-        confirm_count = d.get('confirm', None),
-        suspect_count = d.get('suspect', None),
-        dead_count = d.get('dead', None),
-        heal_count = d.get('heal', None),
-        )
+            date = dt,
+            confirm_count = d.get('confirm', None),
+            suspect_count = d.get('suspect', None),
+            dead_count = d.get('dead', None),
+            heal_count = d.get('heal', None),
+            )
   if iscreated:
     print ('save daily id:', dobj._id)
   else:
     print ('Create DAILY SUMMARY failed. Possibly exists:',  d.get('date', 'Null'))
 
 
-## Area infection update
-# Area will append a new data each run
-print ('processing area update ...')
-arealist = json.loads(DATA['area_count'])
-for a in arealist:
-  country = a.get('country', None)
-  area = a.get('area', None)
-  city = a.get('city', None)
-  aobj = QQNEWS_AREA(
-        country = country,
-        area = area,
-        city = city,
-##TODO add translated version here
-        country_en = zh_en_loc(country, (country, area, city)), # more accurate translation with context
-        area_en = zh_en_loc(area, (country, area, city)),
-        city_en = zh_en_loc(city, (country, area, city)),
 
-        confirm_count = a.get('confirm', None),
-        suspect_count = a.get('suspect', None),
-        dead_count = a.get('dead', None),
-        heal_count = a.get('heal', None)
+############ AREA ##############
+
+def processAreaTree(tree):
+
+  print ("parsing tree ...")
+  
+  arealist = []
+  # Country -> Area -> City
+  for country in tree:
+    res = {}
+
+    if 'children' in country:
+
+      for area in country['children']:
+
+        if 'children' in area:
+
+          for city in area['children']:
+            co, ar, ci = country['name'], area['name'], city['name']
+            cac = (co,ar,ci)
+
+            res['country'], res['country_en'] = co, zh_en_loc(co, cac)
+            res['area'], res['area_en'] = ar, zh_en_loc(ar, cac)
+            res['city'], res['city_en'] = ci, zh_en_loc(ci, cac)
+
+            res['total'] = city['total']
+            res['today'] = city['today']
+
+            arealist.append(res)
+            res = {}
+
+        else: # no city, only area
+          co, ar, ci = country['name'], area['name'], None
+          cac = (co,ar,ci)
+          
+          res['country'], res['country_en'] = co, zh_en_loc(co, cac)
+          res['area'], res['area_en'] = ar, zh_en_loc(ar, cac)
+          res['city'], res['city_en'] = None, None
+
+
+          res['total'] = area['total']
+          res['today'] = area['today']
+
+          arealist.append(res)
+          res = {}
+
+    else: # no area , only country
+
+      co, ar, ci = country['name'], None, None
+      cac = (co,ar,ci)
+
+      res['country'], res['country_en'] = co, zh_en_loc(co, cac)
+      res['area'], res['area_en'] = None, None
+      res['city'], res['city_en'] = None, None
+      
+      res['total'] = country['total']
+      res['today'] = country['today']
+
+      arealist.append(res)
+      res = {}
+
+  return arealist
+
+tree = data['areaTree']
+arealist = processAreaTree(tree)
+
+print ('processing area update ...')
+for re in arealist:
+  aobj = QQNEWS_AREA(
+        country = re['country'],
+        area = re['area'],
+        city = re['city'],
+        country_en = re['country_en'],
+        area_en = re['area_en'],
+        city_en = re['city_en'],
+        confirm_count = re['total']['confirm'],
+        suspect_count = re['total']['suspect'],
+        dead_count = re['total']['dead'],
+        heal_count = re['total']['heal'],
+        confirm_today_count = re['today']['confirm'],
+        suspect_today_count = re['today']['suspect'],
+        dead_today_count = re['today']['dead'],
+        heal_today_count = re['today']['heal'],
+        sourceLastUpdateTime = last_update_time
       )
   aobj.save()
-  print ('saved ', a.get('country', 'Null'), a.get('area', 'Null'), a.get('city', 'Null'))
+  print ('saved ', re['country'], re['area'], re['city'] )
+
+
 
 
 ## Process News, Title set to unique, same title will only has 1 entry
@@ -225,12 +299,12 @@ news = json.loads(DATA['news'])
 for n in news:
 
   try:
-    new_time = datetime.strptime(n.get('time', '12-31 23:59'), '%m-%d %H:%M').replace(year=datetime.now().year)
+    new_time = datetime.strptime(n.get('time', '12-31 23:59'), '%m-%d %H:%M').replace(year=datetime.now().year) - timedelta(hours=8)
   except ValueError:
     new_time = datetime(1000, 1, 1, 0,0,0)
 
   try:
-    create_dt = datetime.strptime(n.get('create_time', '1000-01-01T00:00:00.000Z'), '%Y-%m-%dT%H:%M:%S.000Z')
+    create_dt = datetime.strptime(n.get('create_time', '1000-01-01T00:00:00.000Z'), '%Y-%m-%dT%H:%M:%S.000Z') - timedelta(hours=8)
   except ValueError:
     create_dt = datetime(1000,1,1,0,0,0)
 
@@ -247,4 +321,4 @@ for n in news:
     print ('Create NEWS summary failed. Possibly exists:',  n.get('title', 'Null'))
 
 
-print ('end of script')
+print ('Ended at: ', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
